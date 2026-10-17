@@ -18,48 +18,31 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
       - name: Check Windows
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $instance = '${{ inputs.instance_number }}'
-
-          if ($instance -notmatch '^(10|[1-9])$') {
-            throw 'Choose an instance between 1 and 10.'
-          }
-
           Get-CimInstance Win32_OperatingSystem |
             Select-Object Caption, Version
-
-          Write-Host "Instance: $instance"
 
       - name: Install Tailscale
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = Join-Path $env:TEMP 'tailscale-setup.exe'
+          $installer = "$env:TEMP\tailscale-setup.exe"
 
           Invoke-WebRequest `
-            -Uri 'https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe' `
+            'https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe' `
             -OutFile $installer
 
-          Start-Process `
-            -FilePath $installer `
-            -ArgumentList '/quiet' `
-            -Wait
+          Start-Process $installer -ArgumentList '/quiet' -Wait
 
           $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
-
           if (!(Test-Path $tailscale)) {
             throw 'Tailscale installation failed.'
           }
 
-          Write-Host 'Tailscale installed.'
-
-      - name: Authenticate Tailscale
+      - name: Connect Tailscale
         shell: pwsh
         env:
           TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
@@ -67,7 +50,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           if ([string]::IsNullOrWhiteSpace($env:TAILSCALE_AUTH_KEY)) {
-            throw 'Configure TAILSCALE_AUTH_KEY in repository Actions secrets.'
+            throw 'Missing repository secret TAILSCALE_AUTH_KEY.'
           }
 
           $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
@@ -77,23 +60,38 @@ jobs:
             "--hostname=pc-rafael-${{ inputs.instance_number }}"
 
           if ($LASTEXITCODE -ne 0) {
-            throw "Tailscale authentication failed: code $LASTEXITCODE"
+            throw 'Tailscale could not connect. Check the auth key.'
           }
+
+          $ip = (& $tailscale ip -4 | Select-Object -First 1).Trim()
+
+          if ($LASTEXITCODE -ne 0 -or !$ip) {
+            throw 'Could not obtain Tailscale IP.'
+          }
+
+          "TAILSCALE_IP=$ip" |
+            Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
           & $tailscale status
 
-          $TailscaleIP = (
-            & $tailscale ip -4 |
-            Select-Object -First 1
-          ).Trim()
+      - name: Enable RDP and Configure Firewall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
 
-          if ($LASTEXITCODE -ne 0 -or
-              [string]::IsNullOrWhiteSpace($TailscaleIP)) {
-            throw 'Could not obtain the Tailscale IPv4 address.'
-          }
+          Set-ItemProperty `
+            -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' `
+            -Name fDenyTSConnections -Value 0
 
-          "TAILSCALE_IP=$TailscaleIP" |
-            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Set-Service -Name TermService -StartupType Automatic
+          Start-Service -Name TermService
+
+          Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
+
+          Set-NetFirewallProfile -Profile Domain,Private,Public `
+            -DefaultInboundAction Block
+
+          Write-Host 'RDP enabled. Firewall defaults remain blocked.'
 
       - name: Create Rafael Account
         shell: pwsh
@@ -110,70 +108,60 @@ jobs:
             -ErrorAction SilentlyContinue
 
           if ($null -eq $User) {
-            New-LocalUser `
-              -Name $Username `
+            New-LocalUser -Name $Username `
               -Password $SecurePassword `
-              -Description 'Windows account Rafael' `
-              -ErrorAction Stop | Out-Null
+              -Description 'Windows account Rafael' |
+              Out-Null
           }
           else {
-            Set-LocalUser `
-              -Name $Username `
-              -Password $SecurePassword `
-              -ErrorAction Stop
+            Set-LocalUser -Name $Username -Password $SecurePassword
           }
 
           Enable-LocalUser -Name $Username
 
-          Write-Host 'Windows account is ready.'
+          Add-LocalGroupMember `
+            -Group 'Remote Desktop Users' `
+            -Member $Username `
+            -ErrorAction SilentlyContinue
 
-      - name: Check RDP Service
+          Write-Host 'Windows account configured.'
+
+      - name: Test RDP Listener
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $service = Get-Service -Name TermService `
+          $listener = Get-NetTCPConnection `
+            -State Listen -LocalPort 3389 `
             -ErrorAction SilentlyContinue
 
-          if ($null -ne $service) {
-            $service |
-              Select-Object Name, Status, StartType
+          if ($listener) {
+            Write-Host 'RDP port 3389 is listening.'
           }
           else {
-            Write-Host 'RDP service was not found.'
+            Write-Host 'RDP port 3389 is not listening yet.'
           }
 
-      - name: Show Access Details
+          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
+
+      - name: Show Connection Details
         if: ${{ success() }}
         shell: pwsh
         run: |
           Write-Host ''
-          Write-Host '======================================'
-          Write-Host '          VIRTUAL PC DETAILS'
-          Write-Host '======================================'
-          Write-Host "Account name: Rafael"
+          Write-Host '======= VIRTUAL PC DETAILS ======='
+          Write-Host 'Account: Rafael'
           Write-Host 'Password: Wl7mX#2026@Pc!'
           Write-Host "Tailscale IP: $env:TAILSCALE_IP"
           Write-Host 'RDP port: 3389'
-          Write-Host '======================================'
-          Write-Host ''
+          Write-Host '=================================='
 
-      - name: Keep Runner Active for 6 Hours
+      - name: Keep Runner Active
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          $endTime = (Get-Date).AddHours(6)
-
-          Write-Host 'Keeping the runner active.'
+          $endTime = (Get-Date).AddHours(5)
 
           while ((Get-Date) -lt $endTime) {
-            $remaining = $endTime - (Get-Date)
-
-            Write-Host (
-              'Time remaining: {0:hh\:mm\:ss}' -f $remaining
-            )
-
+            Write-Host "Runner active: $(Get-Date -Format 'HH:mm:ss')"
             Start-Sleep -Seconds 60
           }
-
-          Write-Host 'Wait period completed.'
