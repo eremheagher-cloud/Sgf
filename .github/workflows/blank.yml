@@ -36,7 +36,7 @@ jobs:
             Select-Object Caption, Version
 
           Write-Host "Instância: $instance"
-          Write-Host 'Runner do GitHub iniciado.'
+          Write-Host 'Runner iniciado.'
 
       - name: Instalar Tailscale
         shell: pwsh
@@ -90,7 +90,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $Username = 'Rafael'
-          $Password = 'rafaelehf'
+          $Password = 'Rafael@2026Pc!'
 
           $SecurePassword = ConvertTo-SecureString `
             $Password -AsPlainText -Force
@@ -110,7 +110,12 @@ jobs:
               -Password $SecurePassword
           }
 
+          if (!(Get-LocalUser -Name $Username -ErrorAction SilentlyContinue)) {
+            throw 'Não foi possível criar a conta Rafael.'
+          }
+
           Write-Host 'Conta Windows Rafael criada ou atualizada.'
+          Write-Host "Usuário: $Username"
 
       - name: Verificar serviço RDP
         shell: pwsh
@@ -124,7 +129,7 @@ jobs:
             $service | Select-Object Name, Status, StartType
           }
 
-          Write-Host 'A verificação do serviço não garante acesso RDP externo.'
+          Write-Host 'A verificação não garante acesso RDP externo.'
 
       - name: Manter execução por até 6 horas
         shell: pwsh
