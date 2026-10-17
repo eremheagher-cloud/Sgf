@@ -35,8 +35,7 @@ jobs:
             Select-Object Caption, Version
 
           Write-Host "Instância: $instance"
-          Write-Host "Usuário atual:"
-          whoami
+          Write-Host 'Runner oficial do GitHub iniciado.'
 
       - name: Instalar Tailscale
         shell: pwsh
@@ -79,29 +78,53 @@ jobs:
             "--hostname=pc-rafael-${{ inputs.instance_number }}"
 
           if ($LASTEXITCODE -ne 0) {
-            throw "A autenticação do Tailscale falhou. Código: $LASTEXITCODE"
+            throw "Falha na autenticação do Tailscale: código $LASTEXITCODE"
           }
 
           & $tailscale status
 
-      - name: Verificar usuário e serviço RDP
+      - name: Criar conta Windows Rafael
         shell: pwsh
+        env:
+          RAFAEL_PASSWORD: ${{ secrets.RAFAEL_PASSWORD }}
         run: |
           $ErrorActionPreference = 'Stop'
 
-          Write-Host 'Verificando usuário Rafael...'
+          $Username = 'Rafael'
+          $Password = $env:RAFAEL_PASSWORD
 
-          $user = Get-LocalUser -Name 'Rafael' `
+          if ([string]::IsNullOrWhiteSpace($Password)) {
+            throw 'Configure RAFAEL_PASSWORD nos secrets do repositório.'
+          }
+
+          $SecurePassword = ConvertTo-SecureString `
+            $Password -AsPlainText -Force
+
+          $User = Get-LocalUser -Name $Username `
             -ErrorAction SilentlyContinue
 
-          if ($null -eq $user) {
-            Write-Host 'O usuário Rafael não existe neste runner.'
+          if ($null -eq $User) {
+            New-LocalUser `
+              -Name $Username `
+              -Password $SecurePassword `
+              -Description 'Conta Windows Rafael'
           }
           else {
-            $user | Select-Object Name, Enabled
+            Set-LocalUser `
+              -Name $Username `
+              -Password $SecurePassword
           }
 
-          Write-Host 'Verificando serviço RDP...'
+          Write-Host ''
+          Write-Host '===== DADOS DE ACESSO WINDOWS ====='
+          Write-Host "Usuário: $Username"
+          Write-Host "Senha: $Password"
+          Write-Host '==================================='
+
+      - name: Verificar serviço RDP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
 
           $service = Get-Service -Name TermService `
             -ErrorAction SilentlyContinue
@@ -113,7 +136,7 @@ jobs:
             $service | Select-Object Name, Status, StartType
           }
 
-          Write-Host 'O diagnóstico não garante acesso RDP externo.'
+          Write-Host 'A presença do serviço não garante acesso RDP externo.'
 
       - name: Manter execução por até 6 horas
         shell: pwsh
