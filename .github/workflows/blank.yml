@@ -1,4 +1,3 @@
-
 name: PC criado pelo @alves7.pcm
 
 on:
@@ -83,24 +82,13 @@ jobs:
 
           & $tailscale status
 
-      - name: Inspect policy and create Rafael account
+      - name: Create Rafael Account
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
           $Username = 'Rafael'
-          $Password = 'Rafael#Wl7mX@2026'
-
-          Write-Host 'Local account policy:'
-          net accounts
-
-          $PolicyFile = Join-Path $env:TEMP 'security-policy.inf'
-          secedit /export /cfg $PolicyFile /areas SECURITYPOLICY /quiet
-
-          if (Test-Path $PolicyFile) {
-            Select-String -Path $PolicyFile `
-              -Pattern 'PasswordComplexity|MinimumPasswordLength|PasswordHistorySize'
-          }
+          $Password = 'Wl7mX#2026@Pc!'
 
           $SecurePassword = ConvertTo-SecureString `
             $Password -AsPlainText -Force
@@ -122,26 +110,24 @@ jobs:
               -ErrorAction Stop
           }
 
+          Enable-LocalUser -Name $Username
+
           Get-LocalUser -Name $Username |
             Select-Object Name, Enabled
 
           Write-Host 'Rafael account created or updated.'
 
-      - name: Check RDP service
+      - name: Check RDP Service
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $service = Get-Service -Name TermService `
-            -ErrorAction SilentlyContinue
-
-          if ($null -ne $service) {
-            $service | Select-Object Name, Status, StartType
-          }
+          Get-Service -Name TermService |
+            Select-Object Name, Status, StartType
 
           Write-Host 'RDP service status checked.'
 
-      - name: Keep runner active for up to 6 hours
+      - name: Keep Runner Active for 6 Hours
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -160,4 +146,3 @@ jobs:
           }
 
           Write-Host 'Wait period completed.'
-          
