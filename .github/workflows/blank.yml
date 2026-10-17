@@ -21,15 +21,20 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Verificar Windows e permissões
+      - name: Verificar Windows
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $instance = '${{ inputs.instance_number }}'
 
-          Write-Host "Sistema operacional:"
+          if ($instance -notmatch '^(10|[1-9])$') {
+            throw 'Escolha uma instância entre 1 e 10.'
+          }
+
           Get-CimInstance Win32_OperatingSystem |
             Select-Object Caption, Version
 
+          Write-Host "Instância: $instance"
           Write-Host "Usuário atual:"
           whoami
 
@@ -37,7 +42,6 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-
           $installer = Join-Path $env:TEMP 'tailscale-setup.exe'
 
           Invoke-WebRequest `
@@ -65,17 +69,17 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           if ([string]::IsNullOrWhiteSpace($env:TAILSCALE_AUTH_KEY)) {
-            throw 'Configure TAILSCALE_AUTH_KEY nos secrets do repositório.'
+            throw 'Configure TAILSCALE_AUTH_KEY em Settings > Secrets and variables > Actions.'
           }
 
           $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
 
           & $tailscale up `
-            --auth-key="$env:TAILSCALE_AUTH_KEY" `
-            --hostname="pc-rafael-${{ inputs.instance_number }}"
+            "--auth-key=$env:TAILSCALE_AUTH_KEY" `
+            "--hostname=pc-rafael-${{ inputs.instance_number }}"
 
           if ($LASTEXITCODE -ne 0) {
-            throw 'O Tailscale não conseguiu autenticar.'
+            throw "A autenticação do Tailscale falhou. Código: $LASTEXITCODE"
           }
 
           & $tailscale status
@@ -85,25 +89,39 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          Write-Host 'Usuário atual do runner:'
-          whoami
+          Write-Host 'Verificando usuário Rafael...'
 
-          Write-Host 'Usuário Rafael, se existir:'
-          Get-LocalUser -Name Rafael -ErrorAction SilentlyContinue
+          $user = Get-LocalUser -Name 'Rafael' `
+            -ErrorAction SilentlyContinue
 
-          Write-Host 'Serviço de Área de Trabalho Remota:'
-          Get-Service -Name TermService |
-            Select-Object Name, Status, StartType
+          if ($null -eq $user) {
+            Write-Host 'O usuário Rafael não existe neste runner.'
+          }
+          else {
+            $user | Select-Object Name, Enabled
+          }
 
-          Write-Host ''
-          Write-Host 'O runner hospedado pelo GitHub é temporário.'
-          Write-Host 'Estas verificações não garantem conectividade RDP externa.'
+          Write-Host 'Verificando serviço RDP...'
+
+          $service = Get-Service -Name TermService `
+            -ErrorAction SilentlyContinue
+
+          if ($null -eq $service) {
+            Write-Host 'Serviço RDP não encontrado.'
+          }
+          else {
+            $service | Select-Object Name, Status, StartType
+          }
+
+          Write-Host 'O diagnóstico não garante acesso RDP externo.'
 
       - name: Manter execução por até 6 horas
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $endTime = (Get-Date).AddHours(6)
+
+          Write-Host 'Mantendo o runner ativo até o limite do job.'
 
           while ((Get-Date) -lt $endTime) {
             $remaining = $endTime - (Get-Date)
