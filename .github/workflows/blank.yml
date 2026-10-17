@@ -36,7 +36,7 @@ jobs:
             Select-Object Caption, Version
 
           Write-Host "Instância: $instance"
-          Write-Host 'Runner do GitHub iniciado.'
+          Write-Host 'Runner iniciado.'
 
       - name: Instalar Tailscale
         shell: pwsh
@@ -84,21 +84,28 @@ jobs:
 
           & $tailscale status
 
-      - name: Criar conta Windows Rafael
+      - name: Verificar política e criar conta Rafael
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
           $Username = 'Rafael'
-          $Password = 'Rafael#Wl7mX@2026'
+          $Password = 'iLovstoryIR
+
+          Write-Host 'Política local de contas:'
+          net accounts
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'Não foi possível consultar a política com net accounts.'
+          }
+
+          $SecurePassword = ConvertTo-SecureString `
+            $Password -AsPlainText -Force
+
+          $User = Get-LocalUser -Name $Username `
+            -ErrorAction SilentlyContinue
 
           try {
-            $SecurePassword = ConvertTo-SecureString `
-              $Password -AsPlainText -Force
-
-            $User = Get-LocalUser -Name $Username `
-              -ErrorAction SilentlyContinue
-
             if ($null -eq $User) {
               New-LocalUser `
                 -Name $Username `
@@ -113,14 +120,15 @@ jobs:
                 -ErrorAction Stop
             }
 
-            $User = Get-LocalUser -Name $Username `
-              -ErrorAction Stop
+            Get-LocalUser -Name $Username |
+              Select-Object Name, Enabled
 
-            Write-Host 'Conta Windows Rafael criada ou atualizada.'
-            Write-Host "Usuário: $Username"
+            Write-Host 'Conta Rafael criada ou atualizada.'
           }
           catch {
-            throw "Falha ao configurar a conta Windows Rafael. Verifique a política de senhas do ambiente. Detalhe: $($_.Exception.Message)"
+            Write-Host 'O Windows recusou a criação ou a atualização da conta.'
+            Write-Host 'Verifique comprimento mínimo, complexidade e histórico de senhas.'
+            throw
           }
 
       - name: Verificar serviço RDP
@@ -135,7 +143,7 @@ jobs:
             $service | Select-Object Name, Status, StartType
           }
 
-          Write-Host 'A verificação do serviço não garante acesso RDP externo.'
+          Write-Host 'A existência do serviço não garante acesso RDP externo.'
 
       - name: Manter execução por até 6 horas
         shell: pwsh
