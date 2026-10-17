@@ -1,79 +1,96 @@
-name: PC virtual - eremheagher-cloud
+
+name: Meu PC Virtual
 
 on:
   workflow_dispatch:
     inputs:
       instance_number:
-        description: "Numero da instancia (1-10)"
+        description: "Número da sessão"
         required: true
         default: "1"
-        type: string
+        type: choice
+        options:
+          - "1"
+          - "2"
+          - "3"
+          - "4"
+          - "5"
 
 permissions:
   contents: read
 
 jobs:
-  deploy-rdp:
+  virtual-pc:
+    name: Preparar PC Virtual
     runs-on: windows-2022
-    timeout-minutes: 360
+    timeout-minutes: 350
 
     steps:
-      - name: Verificar conta GitHub
+      - name: Gerar conta e código de acesso
         shell: pwsh
-        env:
-          GITHUB_ACTOR: ${{ github.actor }}
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $AuthorizedAccount = 'eremheagher-cloud'
-          $CurrentAccount = $env:GITHUB_ACTOR
+          $username = "PCVirtual"
+          $bytes = New-Object byte[] 24
+          [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+          $password = [Convert]::ToBase64String($bytes).
+            Replace('+','A').Replace('/','B').TrimEnd('=')
 
-          Write-Host "Conta detectada: $CurrentAccount"
+          $securePassword = ConvertTo-SecureString `
+            $password -AsPlainText -Force
 
-          if ($CurrentAccount -ine $AuthorizedAccount) {
-            throw "Acesso negado: conta nao autorizada."
+          $user = Get-LocalUser -Name $username `
+            -ErrorAction SilentlyContinue
+
+          if ($null -eq $user) {
+            New-LocalUser `
+              -Name $username `
+              -Password $securePassword `
+              -FullName "Meu PC Virtual" `
+              -Description "Conta temporária" | Out-Null
+          } else {
+            Set-LocalUser -Name $username `
+              -Password $securePassword
           }
 
-          Write-Host "Conta autorizada."
+          $code = [Guid]::NewGuid().ToString("N").Substring(0,8).ToUpper()
 
-      - name: Validar segredo Tailscale
+          $summary = @"
+          # Meu PC Virtual
+
+          **Estado:** Conta temporária criada
+
+          | Informação | Valor |
+          |---|---|
+          | Sessão | ${{ inputs.instance_number }} |
+          | Nome da conta Windows | $username |
+          | Senha da sessão | $password |
+          | Código da sessão | $code |
+          | Sistema | Windows Server 2022 |
+
+          ## Como conectar
+
+          1. Abra a aplicação Área de Trabalho Remota (RDP).
+          2. Informe o endereço de um PC remoto que você controla.
+          3. Use o nome da conta e a senha acima, se essa conta existir nesse PC.
+
+          **Importante:** o código da sessão é apenas um identificador.
+          Ele não é um endereço de rede nem um código de autenticação RDP.
+          Este runner é temporário e não recebe conexões RDP externas
+          automaticamente.
+          "@
+
+          $summary | Out-File `
+            -FilePath $env:GITHUB_STEP_SUMMARY `
+            -Encoding utf8
+
+          Write-Host "Conta preparada. Consulte o resumo da execução."
+          Write-Host "A senha não será impressa nos logs."
+
+      - name: Informações da sessão
         shell: pwsh
-        env:
-          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          $ErrorActionPreference = 'Stop'
-
-          if ([string]::IsNullOrWhiteSpace(
-            $env:TAILSCALE_AUTH_KEY
-          )) {
-            throw "Configure o segredo TAILSCALE_AUTH_KEY em Settings > Secrets and variables > Actions."
-          }
-
-          Write-Host "Segredo encontrado. Valor oculto por seguranca."
-
-      - name: Conectar ao Tailscale
-        uses: tailscale/github-action@v4
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
-          version: latest
-          use-cache: 'false'
-
-      - name: Verificar instancia
-        shell: pwsh
-        env:
-          INSTANCE_NUMBER: ${{ inputs.instance_number }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $Number = 0
-
-          if (-not [int]::TryParse(
-            $env:INSTANCE_NUMBER, [ref]$Number
-          ) -or $Number -lt 1 -or $Number -gt 10) {
-            throw "Numero de instancia invalido. Escolha de 1 a 10."
-          }
-
-          Write-Host "Instancia selecionada: $Number"
-          Write-Host "Runner Windows do GitHub Actions iniciado."
-          Write-Host "A conexao Tailscale foi solicitada."
-          Write-Host "O runner e temporario e sera encerrado ao fim do job."
+          Write-Host "Abra o resumo desta execução para ver os dados."
+          Write-Host "O runner será encerrado quando o workflow terminar."
+          
