@@ -36,7 +36,7 @@ jobs:
             Select-Object Caption, Version
 
           Write-Host "Instância: $instance"
-          Write-Host 'Runner iniciado.'
+          Write-Host 'Runner do GitHub iniciado.'
 
       - name: Instalar Tailscale
         shell: pwsh
@@ -90,32 +90,38 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $Username = 'Rafael'
-          $Password = 'Rafael@2026Pc!'
+          $Password = 'Rafael#Wl7mX@2026'
 
-          $SecurePassword = ConvertTo-SecureString `
-            $Password -AsPlainText -Force
+          try {
+            $SecurePassword = ConvertTo-SecureString `
+              $Password -AsPlainText -Force
 
-          $User = Get-LocalUser -Name $Username `
-            -ErrorAction SilentlyContinue
+            $User = Get-LocalUser -Name $Username `
+              -ErrorAction SilentlyContinue
 
-          if ($null -eq $User) {
-            New-LocalUser `
-              -Name $Username `
-              -Password $SecurePassword `
-              -Description 'Conta Windows Rafael'
+            if ($null -eq $User) {
+              New-LocalUser `
+                -Name $Username `
+                -Password $SecurePassword `
+                -Description 'Conta Windows Rafael' `
+                -ErrorAction Stop
+            }
+            else {
+              Set-LocalUser `
+                -Name $Username `
+                -Password $SecurePassword `
+                -ErrorAction Stop
+            }
+
+            $User = Get-LocalUser -Name $Username `
+              -ErrorAction Stop
+
+            Write-Host 'Conta Windows Rafael criada ou atualizada.'
+            Write-Host "Usuário: $Username"
           }
-          else {
-            Set-LocalUser `
-              -Name $Username `
-              -Password $SecurePassword
+          catch {
+            throw "Falha ao configurar a conta Windows Rafael. Verifique a política de senhas do ambiente. Detalhe: $($_.Exception.Message)"
           }
-
-          if (!(Get-LocalUser -Name $Username -ErrorAction SilentlyContinue)) {
-            throw 'Não foi possível criar a conta Rafael.'
-          }
-
-          Write-Host 'Conta Windows Rafael criada ou atualizada.'
-          Write-Host "Usuário: $Username"
 
       - name: Verificar serviço RDP
         shell: pwsh
@@ -129,7 +135,7 @@ jobs:
             $service | Select-Object Name, Status, StartType
           }
 
-          Write-Host 'A verificação não garante acesso RDP externo.'
+          Write-Host 'A verificação do serviço não garante acesso RDP externo.'
 
       - name: Manter execução por até 6 horas
         shell: pwsh
