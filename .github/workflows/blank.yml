@@ -36,7 +36,6 @@ jobs:
             Select-Object Caption, Version
 
           Write-Host "Instance: $instance"
-          Write-Host 'GitHub runner started.'
 
       - name: Install Tailscale
         shell: pwsh
@@ -84,7 +83,7 @@ jobs:
 
           & $tailscale status
 
-      - name: Check policy and create Rafael account
+      - name: Inspect policy and create Rafael account
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -94,6 +93,14 @@ jobs:
 
           Write-Host 'Local account policy:'
           net accounts
+
+          $PolicyFile = Join-Path $env:TEMP 'security-policy.inf'
+          secedit /export /cfg $PolicyFile /areas SECURITYPOLICY /quiet
+
+          if (Test-Path $PolicyFile) {
+            Select-String -Path $PolicyFile `
+              -Pattern 'PasswordComplexity|MinimumPasswordLength|PasswordHistorySize'
+          }
 
           $SecurePassword = ConvertTo-SecureString `
             $Password -AsPlainText -Force
@@ -132,7 +139,7 @@ jobs:
             $service | Select-Object Name, Status, StartType
           }
 
-          Write-Host 'Service presence does not guarantee external RDP access.'
+          Write-Host 'RDP service status checked.'
 
       - name: Keep runner active for up to 6 hours
         shell: pwsh
