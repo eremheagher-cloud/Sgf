@@ -1,35 +1,32 @@
-
-name: PC virtual - Proprietario e Tailscale
+name: PC virtual - eremheagher-cloud
 
 on:
   workflow_dispatch:
+    inputs:
+      instance_number:
+        description: "Numero da instancia (1-10)"
+        required: true
+        default: "1"
+        type: string
 
 permissions:
   contents: read
 
-concurrency:
-  group: pc-virtual-${{ github.repository }}
-  cancel-in-progress: false
-
 jobs:
-  verify-owner:
-    name: Verificar conta e conectar
+  deploy-rdp:
     runs-on: windows-2022
-    timeout-minutes: 30
+    timeout-minutes: 360
 
     steps:
-      - name: Verificar conta GitHub
+      - name: Verificar conta autorizada
         shell: pwsh
         env:
-          DETECTED_ACCOUNT: ${{ github.actor }}
+          GITHUB_ACTOR: ${{ github.actor }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $AuthorizedAccount = 'ed7537460-source'
-          $CurrentAccount = $env:DETECTED_ACCOUNT
 
-          if ([string]::IsNullOrWhiteSpace($CurrentAccount)) {
-            throw "Conta GitHub nao detectada."
-          }
+          $AuthorizedAccount = 'eremheagher-cloud'
+          $CurrentAccount = $env:GITHUB_ACTOR
 
           Write-Host "Conta detectada: $CurrentAccount"
 
@@ -37,20 +34,22 @@ jobs:
             throw "Acesso negado: conta nao autorizada."
           }
 
-          Write-Host "Verificacao de conta aprovada."
+          Write-Host "Conta autorizada."
 
-      - name: Verificar Auth Key
+      - name: Validar configuracao do Tailscale
         shell: pwsh
         env:
           TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
           $ErrorActionPreference = 'Stop'
 
-          if ([string]::IsNullOrWhiteSpace($env:TAILSCALE_AUTH_KEY)) {
-            throw "Falta configurar o Secret TAILSCALE_AUTH_KEY."
+          if ([string]::IsNullOrWhiteSpace(
+            $env:TAILSCALE_AUTH_KEY
+          )) {
+            throw "Configure o segredo TAILSCALE_AUTH_KEY nas configuracoes do repositorio."
           }
 
-          Write-Host "Auth Key presente; valor oculto."
+          Write-Host "Segredo encontrado. O valor nao sera exibido."
 
       - name: Conectar ao Tailscale
         uses: tailscale/github-action@v4
@@ -59,24 +58,41 @@ jobs:
           version: latest
           use-cache: 'false'
 
-      - name: Confirmar conexao
+      - name: Verificar conexao
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $cmd = Get-Command tailscale.exe `
+          $Tailscale = Get-Command tailscale.exe `
             -ErrorAction SilentlyContinue
 
-          if (-not $cmd) {
-            throw "Cliente Tailscale nao encontrado."
+          if (-not $Tailscale) {
+            throw "Cliente Tailscale nao encontrado no PATH."
           }
 
-          & $cmd.Source status
+          & $Tailscale.Source status
 
           if ($LASTEXITCODE -ne 0) {
-            throw "Falha ao verificar a conexao Tailscale."
+            throw "Nao foi possivel verificar o estado do Tailscale."
           }
 
-          Write-Host "Conexao Tailscale verificada."
-          Write-Host "O runner do GitHub Actions e temporario."
-          
+          Write-Host "Verificacao do Tailscale concluida."
+
+      - name: Informacoes da instancia
+        shell: pwsh
+        env:
+          INSTANCE_NUMBER: ${{ inputs.instance_number }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $Number = 0
+
+          if (-not [int]::TryParse(
+            $env:INSTANCE_NUMBER, [ref]$Number
+          ) -or $Number -lt 1 -or $Number -gt 10) {
+            throw "Escolha um numero de instancia entre 1 e 10."
+          }
+
+          Write-Host "Instancia selecionada: $Number"
+          Write-Host "Runner Windows temporario do GitHub Actions."
+          Write-Host "O runner sera encerrado quando o job terminar."
