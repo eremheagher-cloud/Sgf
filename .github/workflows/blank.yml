@@ -1,11 +1,11 @@
 
-name: Meu PC Virtual
+name: PC criado pelo @alves7.pcm
 
 on:
   workflow_dispatch:
     inputs:
       instance_number:
-        description: "Número da sessão"
+        description: "Instance Number (1-10)"
         required: true
         default: "1"
         type: choice
@@ -15,82 +15,147 @@ on:
           - "3"
           - "4"
           - "5"
+          - "6"
+          - "7"
+          - "8"
+          - "9"
+          - "10"
 
 permissions:
   contents: read
 
 jobs:
-  virtual-pc:
-    name: Preparar PC Virtual
-    runs-on: windows-2022
-    timeout-minutes: 350
+  deploy-rdp:
+    name: Preparar Meu PC Virtual
+    # Requer um runner Windows próprio que você administra.
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 360
 
     steps:
-      - name: Gerar conta e código de acesso
-        shell: pwsh
+      - name: System Information
+        shell: powershell
         run: |
-          $ErrorActionPreference = 'Stop'
+          $ErrorActionPreference = "Stop"
 
-          $username = "PCVirtual"
-          $bytes = New-Object byte[] 24
-          [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-          $password = [Convert]::ToBase64String($bytes).
-            Replace('+','A').Replace('/','B').TrimEnd('=')
+          Write-Host "=== MEU PC VIRTUAL ===" -ForegroundColor Green
+          Write-Host "Instance: ${{ inputs.instance_number }}" -ForegroundColor Yellow
+          Write-Host "Runner: $env:RUNNER_NAME" -ForegroundColor Yellow
 
-          $securePassword = ConvertTo-SecureString `
-            $password -AsPlainText -Force
+          Get-ComputerInfo |
+            Select-Object WindowsProductName, WindowsVersion
 
-          $user = Get-LocalUser -Name $username `
+          Get-CimInstance Win32_Processor |
+            Select-Object Name, NumberOfCores,
+              NumberOfLogicalProcessors
+
+      - name: Verify Tailscale
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $ts = Get-Command tailscale.exe `
             -ErrorAction SilentlyContinue
 
-          if ($null -eq $user) {
-            New-LocalUser `
-              -Name $username `
-              -Password $securePassword `
-              -FullName "Meu PC Virtual" `
-              -Description "Conta temporária" | Out-Null
+          if (-not $ts) {
+            $candidate = "C:\Program Files\Tailscale\tailscale.exe"
+            if (Test-Path $candidate) {
+              $tsPath = $candidate
+            } else {
+              throw "Tailscale não está instalado neste runner."
+            }
           } else {
-            Set-LocalUser -Name $username `
-              -Password $securePassword
+            $tsPath = $ts.Source
           }
 
-          $code = [Guid]::NewGuid().ToString("N").Substring(0,8).ToUpper()
+          $service = Get-Service Tailscale `
+            -ErrorAction SilentlyContinue
 
+          if (-not $service) {
+            throw "O serviço Tailscale não foi encontrado."
+          }
+
+          if ($service.Status -ne "Running") {
+            Start-Service Tailscale
+            Start-Sleep -Seconds 5
+          }
+
+          & $tsPath status
+          if ($LASTEXITCODE -ne 0) {
+            throw "Tailscale não está conectado. Verifique o login."
+          }
+
+          $ip = (& $tsPath ip -4 | Select-Object -First 1).Trim()
+          if ($ip -notmatch '^\d{1,3}(\.\d{1,3}){3}$') {
+            throw "Não foi possível obter o IP IPv4 do Tailscale."
+          }
+
+          "TAILSCALE_IP=$ip" | Out-File `
+            -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          Write-Host "Tailscale conectado." -ForegroundColor Green
+          Write-Host "IP Tailscale: $ip" -ForegroundColor Cyan
+
+      - name: Prepare RDP
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "Configurando Área de Trabalho Remota..." `
+            -ForegroundColor Green
+
+          Set-ItemProperty `
+            -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
+            -Name fDenyTSConnections `
+            -Value 0
+
+          Set-ItemProperty `
+            -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
+            -Name UserAuthentication `
+            -Value 1
+
+          Enable-NetFirewallRule `
+            -DisplayGroup "Remote Desktop" `
+            -ErrorAction SilentlyContinue
+
+          Write-Host "RDP configurado. Use apenas em rede privada autorizada." `
+            -ForegroundColor Green
+
+      - name: Show Connection Details
+        shell: powershell
+        run: |
           $summary = @"
           # Meu PC Virtual
 
-          **Estado:** Conta temporária criada
-
-          | Informação | Valor |
-          |---|---|
-          | Sessão | ${{ inputs.instance_number }} |
-          | Nome da conta Windows | $username |
-          | Senha da sessão | $password |
-          | Código da sessão | $code |
-          | Sistema | Windows Server 2022 |
+          - **Sessão:** ${{ inputs.instance_number }}
+          - **Runner:** $env:RUNNER_NAME
+          - **Endereço Tailscale:** $env:TAILSCALE_IP
+          - **Usuário Windows:** use uma conta existente autorizada neste PC
+          - **RDP:** configurado; requer conectividade de rede e autorização
 
           ## Como conectar
+          1. Entre no Tailscale com um dispositivo autorizado na mesma rede.
+          2. Abra a Área de Trabalho Remota.
+          3. Informe o endereço Tailscale acima.
+          4. Use as credenciais da conta Windows autorizada.
 
-          1. Abra a aplicação Área de Trabalho Remota (RDP).
-          2. Informe o endereço de um PC remoto que você controla.
-          3. Use o nome da conta e a senha acima, se essa conta existir nesse PC.
-
-          **Importante:** o código da sessão é apenas um identificador.
-          Ele não é um endereço de rede nem um código de autenticação RDP.
-          Este runner é temporário e não recebe conexões RDP externas
-          automaticamente.
+          **Segurança:** não compartilhe senhas nos logs. Este workflow não
+          cria uma senha universal nem publica o RDP na internet.
           "@
 
           $summary | Out-File `
             -FilePath $env:GITHUB_STEP_SUMMARY `
             -Encoding utf8
 
-          Write-Host "Conta preparada. Consulte o resumo da execução."
-          Write-Host "A senha não será impressa nos logs."
+          Write-Host "Resumo da conexão criado." -ForegroundColor Green
 
-      - name: Informações da sessão
-        shell: pwsh
+      - name: Keep Session Alive
+        shell: powershell
         run: |
-          Write-Host "Abra o resumo desta execução para ver os dados."
-          Write-Host "O runner será encerrado quando o workflow terminar."
+          Write-Host "Monitorando a sessão enquanto este job estiver ativo." `
+            -ForegroundColor Green
+
+          for ($i = 1; $i -le 350; $i++) {
+            Write-Host "Verificação $i - $(Get-Date)"
+            Start-Sleep -Seconds 60
+          }
           
