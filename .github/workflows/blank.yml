@@ -82,6 +82,19 @@ jobs:
 
           & $tailscale status
 
+          $TailscaleIP = (
+            & $tailscale ip -4 |
+            Select-Object -First 1
+          ).Trim()
+
+          if ($LASTEXITCODE -ne 0 -or
+              [string]::IsNullOrWhiteSpace($TailscaleIP)) {
+            throw 'Could not obtain the Tailscale IPv4 address.'
+          }
+
+          "TAILSCALE_IP=$TailscaleIP" |
+            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Create Rafael Account
         shell: pwsh
         run: |
@@ -101,7 +114,7 @@ jobs:
               -Name $Username `
               -Password $SecurePassword `
               -Description 'Windows account Rafael' `
-              -ErrorAction Stop
+              -ErrorAction Stop | Out-Null
           }
           else {
             Set-LocalUser `
@@ -112,20 +125,38 @@ jobs:
 
           Enable-LocalUser -Name $Username
 
-          Get-LocalUser -Name $Username |
-            Select-Object Name, Enabled
-
-          Write-Host 'Rafael account created or updated.'
+          Write-Host 'Windows account is ready.'
 
       - name: Check RDP Service
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
-          Get-Service -Name TermService |
-            Select-Object Name, Status, StartType
+          $service = Get-Service -Name TermService `
+            -ErrorAction SilentlyContinue
 
-          Write-Host 'RDP service status checked.'
+          if ($null -ne $service) {
+            $service |
+              Select-Object Name, Status, StartType
+          }
+          else {
+            Write-Host 'RDP service was not found.'
+          }
+
+      - name: Show Access Details
+        if: ${{ success() }}
+        shell: pwsh
+        run: |
+          Write-Host ''
+          Write-Host '======================================'
+          Write-Host '          VIRTUAL PC DETAILS'
+          Write-Host '======================================'
+          Write-Host "Account name: Rafael"
+          Write-Host 'Password: Wl7mX#2026@Pc!'
+          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
+          Write-Host 'RDP port: 3389'
+          Write-Host '======================================'
+          Write-Host ''
 
       - name: Keep Runner Active for 6 Hours
         shell: pwsh
