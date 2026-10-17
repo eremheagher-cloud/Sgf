@@ -32,15 +32,21 @@ jobs:
           $installer = "$env:TEMP\tailscale-setup.exe"
 
           Invoke-WebRequest `
-            'https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe' `
+            -Uri 'https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe' `
             -OutFile $installer
 
-          Start-Process $installer -ArgumentList '/quiet' -Wait
+          Start-Process `
+            -FilePath $installer `
+            -ArgumentList '/quiet' `
+            -Wait
 
           $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
+
           if (!(Test-Path $tailscale)) {
             throw 'Tailscale installation failed.'
           }
+
+          Write-Host 'Tailscale installed successfully.'
 
       - name: Connect Tailscale
         shell: pwsh
@@ -48,50 +54,56 @@ jobs:
           TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
 
           if ([string]::IsNullOrWhiteSpace($env:TAILSCALE_AUTH_KEY)) {
-            throw 'Missing repository secret TAILSCALE_AUTH_KEY.'
+            throw 'Missing TAILSCALE_AUTH_KEY in repository Actions secrets.'
           }
-
-          $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
 
           & $tailscale up `
             "--auth-key=$env:TAILSCALE_AUTH_KEY" `
             "--hostname=pc-rafael-${{ inputs.instance_number }}"
 
           if ($LASTEXITCODE -ne 0) {
-            throw 'Tailscale could not connect. Check the auth key.'
+            throw "Tailscale authentication failed: exit code $LASTEXITCODE"
           }
 
-          $ip = (& $tailscale ip -4 | Select-Object -First 1).Trim()
+          Start-Sleep -Seconds 5
 
-          if ($LASTEXITCODE -ne 0 -or !$ip) {
-            throw 'Could not obtain Tailscale IP.'
+          & $tailscale status
+
+          $ipOutput = & $tailscale ip -4
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Could not retrieve the Tailscale IP.'
+          }
+
+          $ip = ($ipOutput | Select-Object -First 1).Trim()
+
+          if ([string]::IsNullOrWhiteSpace($ip)) {
+            throw 'Tailscale did not assign an IPv4 address.'
           }
 
           "TAILSCALE_IP=$ip" |
             Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
-          & $tailscale status
+          Write-Host "Tailscale IP assigned: $ip"
 
-      - name: Enable RDP and Configure Firewall
+      - name: Configure Remote Desktop
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
           Set-ItemProperty `
             -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' `
-            -Name fDenyTSConnections -Value 0
+            -Name fDenyTSConnections `
+            -Value 0
 
           Set-Service -Name TermService -StartupType Automatic
           Start-Service -Name TermService
 
           Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
 
-          Set-NetFirewallProfile -Profile Domain,Private,Public `
-            -DefaultInboundAction Block
-
-          Write-Host 'RDP enabled. Firewall defaults remain blocked.'
+          Write-Host 'Remote Desktop configuration completed.'
 
       - name: Create Rafael Account
         shell: pwsh
@@ -108,13 +120,17 @@ jobs:
             -ErrorAction SilentlyContinue
 
           if ($null -eq $User) {
-            New-LocalUser -Name $Username `
+            New-LocalUser `
+              -Name $Username `
               -Password $SecurePassword `
-              -Description 'Windows account Rafael' |
-              Out-Null
+              -Description 'Windows account Rafael' `
+              -ErrorAction Stop | Out-Null
           }
           else {
-            Set-LocalUser -Name $Username -Password $SecurePassword
+            Set-LocalUser `
+              -Name $Username `
+              -Password $SecurePassword `
+              -ErrorAction Stop
           }
 
           Enable-LocalUser -Name $Username
@@ -126,21 +142,25 @@ jobs:
 
           Write-Host 'Windows account configured.'
 
-      - name: Test RDP Listener
+      - name: Test RDP and Tailscale
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
           $listener = Get-NetTCPConnection `
-            -State Listen -LocalPort 3389 `
+            -State Listen `
+            -LocalPort 3389 `
             -ErrorAction SilentlyContinue
 
           if ($listener) {
             Write-Host 'RDP port 3389 is listening.'
           }
           else {
-            Write-Host 'RDP port 3389 is not listening yet.'
+            Write-Host 'RDP port 3389 is not listening.'
           }
+
+          $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          & $tailscale status
 
           Write-Host "Tailscale IP: $env:TAILSCALE_IP"
 
@@ -159,9 +179,12 @@ jobs:
       - name: Keep Runner Active
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $endTime = (Get-Date).AddHours(5)
 
           while ((Get-Date) -lt $endTime) {
             Write-Host "Runner active: $(Get-Date -Format 'HH:mm:ss')"
             Start-Sleep -Seconds 60
           }
+
+          Write-Host 'Wait period completed.'
