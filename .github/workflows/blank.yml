@@ -1,0 +1,82 @@
+
+name: PC virtual - Proprietario e Tailscale
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pc-virtual-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  verify-owner:
+    name: Verificar conta e conectar
+    runs-on: windows-2022
+    timeout-minutes: 30
+
+    steps:
+      - name: Verificar conta GitHub
+        shell: pwsh
+        env:
+          DETECTED_ACCOUNT: ${{ github.actor }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $AuthorizedAccount = 'ed7537460-source'
+          $CurrentAccount = $env:DETECTED_ACCOUNT
+
+          if ([string]::IsNullOrWhiteSpace($CurrentAccount)) {
+            throw "Conta GitHub nao detectada."
+          }
+
+          Write-Host "Conta detectada: $CurrentAccount"
+
+          if ($CurrentAccount -ine $AuthorizedAccount) {
+            throw "Acesso negado: conta nao autorizada."
+          }
+
+          Write-Host "Verificacao de conta aprovada."
+
+      - name: Verificar Auth Key
+        shell: pwsh
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          if ([string]::IsNullOrWhiteSpace($env:TAILSCALE_AUTH_KEY)) {
+            throw "Falta configurar o Secret TAILSCALE_AUTH_KEY."
+          }
+
+          Write-Host "Auth Key presente; valor oculto."
+
+      - name: Conectar ao Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          version: latest
+          use-cache: 'false'
+
+      - name: Confirmar conexao
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $cmd = Get-Command tailscale.exe `
+            -ErrorAction SilentlyContinue
+
+          if (-not $cmd) {
+            throw "Cliente Tailscale nao encontrado."
+          }
+
+          & $cmd.Source status
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Falha ao verificar a conexao Tailscale."
+          }
+
+          Write-Host "Conexao Tailscale verificada."
+          Write-Host "O runner do GitHub Actions e temporario."
+          
