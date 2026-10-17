@@ -15,7 +15,7 @@ permissions:
 jobs:
   deploy-rdp:
     runs-on: windows-2022
-    timeout-minutes: 30
+    timeout-minutes: 360
 
     steps:
       - name: Checkout Repository
@@ -25,7 +25,6 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-
           $instance = '${{ inputs.instance_number }}'
 
           if ($instance -notmatch '^(10|[1-9])$') {
@@ -33,13 +32,12 @@ jobs:
           }
 
           Write-Host "Instância selecionada: $instance"
-          Write-Host "Runner oficial do GitHub: Windows Server 2022"
+          Write-Host 'Runner oficial: Windows Server 2022'
 
       - name: Instalar Tailscale
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-
           $installer = Join-Path $env:TEMP 'tailscale-setup.exe'
 
           Invoke-WebRequest `
@@ -67,7 +65,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           if ([string]::IsNullOrWhiteSpace($env:TAILSCALE_AUTH_KEY)) {
-            throw 'O segredo TAILSCALE_AUTH_KEY não está configurado.'
+            throw 'Configure o segredo TAILSCALE_AUTH_KEY nas configurações do repositório.'
           }
 
           $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
@@ -86,7 +84,6 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-
           $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
 
           & $tailscale status
@@ -95,11 +92,21 @@ jobs:
             throw 'Não foi possível consultar o status do Tailscale.'
           }
 
-          Write-Host 'Verificação concluída.'
-
-      - name: Informações da sessão
+      - name: Manter execução por até 6 horas
         shell: pwsh
+        timeout-minutes: 360
         run: |
-          Write-Host 'O runner oficial do GitHub é temporário.'
-          Write-Host 'O workflow terminará ao concluir suas etapas.'
-          Write-Host 'Este workflow não cria uma sessão RDP persistente.'
+          $ErrorActionPreference = 'Stop'
+          $endTime = (Get-Date).AddHours(6)
+
+          Write-Host 'Mantendo o runner ativo por até 6 horas.'
+
+          while ((Get-Date) -lt $endTime) {
+            $remaining = $endTime - (Get-Date)
+            Write-Host (
+              'Tempo restante: {0:hh\:mm\:ss}' -f $remaining
+            )
+            Start-Sleep -Seconds 60
+          }
+
+          Write-Host 'As 6 horas terminaram.'
