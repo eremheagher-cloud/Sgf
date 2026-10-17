@@ -1,3 +1,4 @@
+
 name: PC criado pelo @alves7.pcm
 
 on:
@@ -35,7 +36,7 @@ jobs:
             Select-Object Caption, Version
 
           Write-Host "Instância: $instance"
-          Write-Host 'Runner oficial do GitHub iniciado.'
+          Write-Host 'Runner do GitHub iniciado.'
 
       - name: Instalar Tailscale
         shell: pwsh
@@ -85,17 +86,11 @@ jobs:
 
       - name: Criar conta Windows Rafael
         shell: pwsh
-        env:
-          RAFAEL_PASSWORD: ${{ secrets.RAFAEL_PASSWORD }}
         run: |
           $ErrorActionPreference = 'Stop'
 
           $Username = 'Rafael'
-          $Password = $env:RAFAEL_PASSWORD
-
-          if ([string]::IsNullOrWhiteSpace($Password)) {
-            throw 'Configure RAFAEL_PASSWORD nos secrets do repositório.'
-          }
+          $Password = 'rafaelehf'
 
           $SecurePassword = ConvertTo-SecureString `
             $Password -AsPlainText -Force
@@ -115,11 +110,7 @@ jobs:
               -Password $SecurePassword
           }
 
-          Write-Host ''
-          Write-Host '===== DADOS DE ACESSO WINDOWS ====='
-          Write-Host "Usuário: $Username"
-          Write-Host "Senha: $Password"
-          Write-Host '==================================='
+          Write-Host 'Conta Windows Rafael criada ou atualizada.'
 
       - name: Verificar serviço RDP
         shell: pwsh
@@ -129,14 +120,11 @@ jobs:
           $service = Get-Service -Name TermService `
             -ErrorAction SilentlyContinue
 
-          if ($null -eq $service) {
-            Write-Host 'Serviço RDP não encontrado.'
-          }
-          else {
+          if ($null -ne $service) {
             $service | Select-Object Name, Status, StartType
           }
 
-          Write-Host 'A presença do serviço não garante acesso RDP externo.'
+          Write-Host 'A verificação do serviço não garante acesso RDP externo.'
 
       - name: Manter execução por até 6 horas
         shell: pwsh
@@ -144,7 +132,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $endTime = (Get-Date).AddHours(6)
 
-          Write-Host 'Mantendo o runner ativo até o limite do job.'
+          Write-Host 'Mantendo o runner ativo.'
 
           while ((Get-Date) -lt $endTime) {
             $remaining = $endTime - (Get-Date)
@@ -157,3 +145,4 @@ jobs:
           }
 
           Write-Host 'Tempo de espera concluído.'
+          
