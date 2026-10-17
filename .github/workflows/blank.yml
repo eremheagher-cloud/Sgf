@@ -32,7 +32,7 @@ jobs:
           }
 
           Write-Host "Instância selecionada: $instance"
-          Write-Host 'Runner oficial: Windows Server 2022'
+          Write-Host 'Runner oficial do GitHub: Windows Server 2022'
 
       - name: Instalar Tailscale
         shell: pwsh
@@ -52,7 +52,7 @@ jobs:
           $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
 
           if (!(Test-Path $tailscale)) {
-            throw 'O executável do Tailscale não foi encontrado.'
+            throw 'Tailscale não foi encontrado após a instalação.'
           }
 
           Write-Host 'Tailscale instalado com sucesso.'
@@ -65,22 +65,58 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           if ([string]::IsNullOrWhiteSpace($env:TAILSCALE_AUTH_KEY)) {
-            throw 'Configure o segredo TAILSCALE_AUTH_KEY nas configurações do repositório.'
+            throw 'Configure o segredo TAILSCALE_AUTH_KEY nas configurações do GitHub.'
           }
 
           $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
 
           & $tailscale up `
             --auth-key="$env:TAILSCALE_AUTH_KEY" `
-            --hostname="pc-alves7-${{ inputs.instance_number }}"
+            --hostname="pc-rafael-${{ inputs.instance_number }}"
 
           if ($LASTEXITCODE -ne 0) {
-            throw "Falha na autenticação do Tailscale. Código: $LASTEXITCODE"
+            throw "Falha na autenticação do Tailscale: código $LASTEXITCODE"
           }
 
-          Write-Host 'Autenticação do Tailscale concluída.'
+          Write-Host 'Tailscale autenticado.'
 
-      - name: Verificar conexão
+      - name: Criar usuário Windows Rafael
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $Username = 'Rafael'
+          $Chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*'.ToCharArray()
+
+          $Password = -join (1..20 | ForEach-Object {
+            $Chars[(Get-Random -Maximum $Chars.Length)]
+          })
+
+          $SecurePassword = ConvertTo-SecureString `
+            $Password -AsPlainText -Force
+
+          $User = Get-LocalUser -Name $Username `
+            -ErrorAction SilentlyContinue
+
+          if ($null -eq $User) {
+            New-LocalUser `
+              -Name $Username `
+              -Password $SecurePassword `
+              -Description 'Usuário Rafael'
+          }
+          else {
+            Set-LocalUser `
+              -Name $Username `
+              -Password $SecurePassword
+          }
+
+          Write-Host ''
+          Write-Host '===== DADOS DO WINDOWS ====='
+          Write-Host "Usuário: $Username"
+          Write-Host "Senha: $Password"
+          Write-Host '============================'
+
+      - name: Verificar conexão Tailscale
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -89,24 +125,23 @@ jobs:
           & $tailscale status
 
           if ($LASTEXITCODE -ne 0) {
-            throw 'Não foi possível consultar o status do Tailscale.'
+            throw 'Não foi possível verificar a conexão do Tailscale.'
           }
 
       - name: Manter execução por até 6 horas
         shell: pwsh
-        timeout-minutes: 360
         run: |
           $ErrorActionPreference = 'Stop'
-          $endTime = (Get-Date).AddHours(6)
+          $EndTime = (Get-Date).AddHours(6)
 
-          Write-Host 'Mantendo o runner ativo por até 6 horas.'
+          Write-Host 'Mantendo a execução ativa.'
 
-          while ((Get-Date) -lt $endTime) {
-            $remaining = $endTime - (Get-Date)
+          while ((Get-Date) -lt $EndTime) {
+            $Remaining = $EndTime - (Get-Date)
             Write-Host (
-              'Tempo restante: {0:hh\:mm\:ss}' -f $remaining
+              'Tempo restante: {0:hh\:mm\:ss}' -f $Remaining
             )
             Start-Sleep -Seconds 60
           }
 
-          Write-Host 'As 6 horas terminaram.'
+          Write-Host 'Tempo de espera concluído.'
