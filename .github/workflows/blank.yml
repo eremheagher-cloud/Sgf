@@ -21,23 +21,23 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Verificar configuração
+      - name: Verificar Windows e permissões
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $instance = '${{ inputs.instance_number }}'
 
-          if ($instance -notmatch '^(10|[1-9])$') {
-            throw 'Escolha uma instância entre 1 e 10.'
-          }
+          Write-Host "Sistema operacional:"
+          Get-CimInstance Win32_OperatingSystem |
+            Select-Object Caption, Version
 
-          Write-Host "Instância selecionada: $instance"
-          Write-Host 'Runner oficial do GitHub: Windows Server 2022'
+          Write-Host "Usuário atual:"
+          whoami
 
       - name: Instalar Tailscale
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+
           $installer = Join-Path $env:TEMP 'tailscale-setup.exe'
 
           Invoke-WebRequest `
@@ -52,10 +52,10 @@ jobs:
           $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
 
           if (!(Test-Path $tailscale)) {
-            throw 'Tailscale não foi encontrado após a instalação.'
+            throw 'A instalação do Tailscale falhou.'
           }
 
-          Write-Host 'Tailscale instalado com sucesso.'
+          Write-Host 'Tailscale instalado.'
 
       - name: Autenticar no Tailscale
         shell: pwsh
@@ -65,7 +65,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           if ([string]::IsNullOrWhiteSpace($env:TAILSCALE_AUTH_KEY)) {
-            throw 'Configure o segredo TAILSCALE_AUTH_KEY nas configurações do GitHub.'
+            throw 'Configure TAILSCALE_AUTH_KEY nos secrets do repositório.'
           }
 
           $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
@@ -75,72 +75,43 @@ jobs:
             --hostname="pc-rafael-${{ inputs.instance_number }}"
 
           if ($LASTEXITCODE -ne 0) {
-            throw "Falha na autenticação do Tailscale: código $LASTEXITCODE"
+            throw 'O Tailscale não conseguiu autenticar.'
           }
-
-          Write-Host 'Tailscale autenticado.'
-
-      - name: Criar usuário Windows Rafael
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $Username = 'Rafael'
-          $Chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*'.ToCharArray()
-
-          $Password = -join (1..20 | ForEach-Object {
-            $Chars[(Get-Random -Maximum $Chars.Length)]
-          })
-
-          $SecurePassword = ConvertTo-SecureString `
-            $Password -AsPlainText -Force
-
-          $User = Get-LocalUser -Name $Username `
-            -ErrorAction SilentlyContinue
-
-          if ($null -eq $User) {
-            New-LocalUser `
-              -Name $Username `
-              -Password $SecurePassword `
-              -Description 'Usuário Rafael'
-          }
-          else {
-            Set-LocalUser `
-              -Name $Username `
-              -Password $SecurePassword
-          }
-
-          Write-Host ''
-          Write-Host '===== DADOS DO WINDOWS ====='
-          Write-Host "Usuário: $Username"
-          Write-Host "Senha: $Password"
-          Write-Host '============================'
-
-      - name: Verificar conexão Tailscale
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
 
           & $tailscale status
 
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Não foi possível verificar a conexão do Tailscale.'
-          }
+      - name: Verificar usuário e serviço RDP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          Write-Host 'Usuário atual do runner:'
+          whoami
+
+          Write-Host 'Usuário Rafael, se existir:'
+          Get-LocalUser -Name Rafael -ErrorAction SilentlyContinue
+
+          Write-Host 'Serviço de Área de Trabalho Remota:'
+          Get-Service -Name TermService |
+            Select-Object Name, Status, StartType
+
+          Write-Host ''
+          Write-Host 'O runner hospedado pelo GitHub é temporário.'
+          Write-Host 'Estas verificações não garantem conectividade RDP externa.'
 
       - name: Manter execução por até 6 horas
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $EndTime = (Get-Date).AddHours(6)
+          $endTime = (Get-Date).AddHours(6)
 
-          Write-Host 'Mantendo a execução ativa.'
+          while ((Get-Date) -lt $endTime) {
+            $remaining = $endTime - (Get-Date)
 
-          while ((Get-Date) -lt $EndTime) {
-            $Remaining = $EndTime - (Get-Date)
             Write-Host (
-              'Tempo restante: {0:hh\:mm\:ss}' -f $Remaining
+              'Tempo restante: {0:hh\:mm\:ss}' -f $remaining
             )
+
             Start-Sleep -Seconds 60
           }
 
